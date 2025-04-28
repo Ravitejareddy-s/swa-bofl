@@ -1,0 +1,20 @@
+# sets up base bucket: {department}-{aws_region}-{namespace}-{name}
+# https://gitlab-tools.swacorp.com/swa-common/ccp/modules/cloud-common-s3-module/
+vBucketList:
+  - name: agbd-analytics
+    versioning: Enabled
+    enableServerAccessLogging: 'true'
+    enableRequestMetrics: 'true'
+    # crossRegion: us-west-2
+    lifecycleRules:
+      - id: ArchiveRule
+        status: Enabled
+        transitions:
+          - storage: GLACIER
+            days: 90
+          - storage: DEEP_ARCHIVE
+            days: 180
+      - id: DeleteMarkerExpirationRule
+        status: Enabled
+        nonCurrentVersionExpirationInDays: 1
+        expiredObjectDeleteMarker: true

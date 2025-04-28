@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: Commodity bag Events Rejects and Warnings Email Alarm Lambda
+
+Parameters:
+  pDepartment:
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9-]*'
+    ConstraintDescription: Must start with a letter and be all lowercase
+    Description: The department Name for the Account (crew, opssuite, dotcom, etc.)
+
+  pNamespace:
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9-]*'
+    ConstraintDescription: Must start with a letter and be all lowercase
+    Description: The Namespace or Platform Instance
+
+  pIamRole:
+    Type: String
+    Description: Customer Project wide IAM role
+
+  pEnableEmailNotif:
+    Type: String
+    Description: Enables / Disables Email notifications
+
+  pDatalakeNamespace:
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9-]*'
+    ConstraintDescription: Must start with a letter and be all lowercase
+    Description: The Namespace or Platform Instance for the datalake
+
+  pStatsBucketPrefix:
+    Type: String
+    Description: The bucket name that is used for storing stats found during execution of glue jobs
+
+  pStatsBucketSuffix:
+    Type: String
+    Description: The generic name that is appended to the end of the s3 bucket for storing stats
+
+  pStatsKey:
+    Type: String
+    Description: The s3 prefix that is used for the stats data created by glue jobs
+
+  pCodeUriBucket:
+    Type: String
+    Description: S3 Bucket where code resides
+
+  pCodeUriKey:
+    Type: String
+    Description: Path within S3 bucket where code resides
+
+Resources:
+  rCmdtyBagsEvntsWarnAlerts:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: rejects_warnings_alerts.lambda_handler
+      CodeUri:
+        Bucket: !Ref pCodeUriBucket
+        Key: !Ref pCodeUriKey
+      Runtime: python3.9
+      Layers:
+        - !Sub "arn:aws:lambda:${AWS::Region}:336392948345:layer:AWSSDKPandas-Python39:13"
+      FunctionName: !Sub "${pDepartment}-${pNamespace}-rejects-warnings"
+      Role: !Sub "${pIamRole}"
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${pDepartment}-${pNamespace}-cmdty-bags-sns-alerts-notify"
+          ENABLE_EMAIL_NOTIFICATIONS: !Sub "${pEnableEmailNotif}"
+          DATALAKE_NAMESPACE: !Sub "${pDatalakeNamespace}"
+          STATS_BUCKET: !Sub "${pStatsBucketPrefix}-${pStatsBucketSuffix}"
+          STATS_KEY: !Sub "${pStatsKey}"
+      Timeout: 300
+
+
+Outputs:
+  oCmdtyBagsEvntsWarnAlerts:
+    Description: Lambda to monitor glue jobs, workflow, dead letter queues, etc...
+    Value: !Ref 'rCmdtyBagsEvntsWarnAlerts'
+
+  oCmdtyBagsWarnAlertsARN:
+    Description: ARN of Lambda to monitor glue jobs, workflows, dead letter queues, etc...
+    Value: !GetAtt 'rCmdtyBagsEvntsWarnAlerts.Arn'

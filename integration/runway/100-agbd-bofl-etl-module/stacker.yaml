@@ -1,0 +1,170 @@
+##  Account REGIONAL values which will change once per account and once per region should be 'hardcoded' here.
+##  Values which need to change from one environment to another, should be abstracted to the appropriate .env file.
+
+namespace: ${namespace}
+cfngin_bucket: ${cfngin_bucket_name}
+sys_path: ./
+
+moduleConfig: &moduleConfig
+  vModuleConfig: ${file yaml:file://${module_config}}
+
+common_parameters: &common_parameters
+  pDepartment: ${department}
+  pNamespace: ${namespace}
+  pIamRole: ${getDataProducerRole commodity}
+  pLoggingLevel: ${LOG_LEVEL}
+  pAppName: ${application}
+  pEnvName: ${environment}
+  pRegion: ${region}
+  pDomain: ${domain}
+
+s3_parameters: &s3_parameters
+  pDatalakeBucketPrefix: datalake-${region}-dev1 # not currently used, set in 100 yaml
+  pDatalakeBucketENTP: datalake-curated-secure/${domain}/agbd-analytics # not currently used, set in 100 yaml
+  pLakeFormationBucket: ${department}/${domain}/${application}
+
+  # Perm Repo Script Bucket # local deply: decp-us-east-1-x318348-local-test1-customer, dev/qa: datalake-us-east-1-dev1-glue-job-scripts
+  pS3ScriptBucket: &pS3ScriptBucket ${datalake_department}-${region}-${datalake_namespace}-${default local_bucket::glue-job-scripts}
+  # Glue Scripts Location
+  pGlueScriptKeyPrefix: &pGlueScriptKeyPrefix ${department}/${domain}/${business_service}/${dataset}  # /decp/customer/opr-analytics
+
+
+  pGlueTempKeyPrefix: ${department}/${domain}/agbd-analytics
+  pGlueTempBucketSuffix: ${default local_bucket::glue-job-temporary}
+
+  ## Kept for future - Lists main vars used by other projects that we may need
+  # pGlueScriptBucketSuffix: ${default local_bucket::glue-job-scripts}
+  # pGlueRawSecureBucketSuffix: ${default local_bucket::raw-secure}
+
+redshift_parameters: &redshift_parameters # may need to be updated
+  pGlueRedshiftTempBucketPrefix: ${group}-${region}-${default local_namespace::${decp_namespace}}
+  pGlueRedshiftTempBucketSuffix: ${default local_bucket::${domain}}
+  pGlueRedshiftTempKeyPrefix: ${application}/data/redshift_load/temp
+
+reject_parameters: &reject_parameters
+  pGlueRejectsBucketPrefix: ${group}-${region}-${default local_namespace::${decp_namespace}}
+  pGlueRejectsBucketSuffix: ${default local_bucket::${domain}}
+  pGlueRejectsKeyPrefix: ${business_service}/data/output/reject
+
+stats_parameters: &stats_parameters
+  # local: decp-us-east-1-x318348-local-test1-booking-and-sales - points to wrong location in local deploy
+  # deployed: datalake - us-east-1 - dev1 -curated-secure - correct once deployed
+  pStatsBucketPrefix: ${datalake_department}-${region}-${datalake_namespace}
+  pStatsBucketSuffix: ${default local_bucket::curated-secure}
+  pStatsKey: ${domain}/agbd-analytics/agbd_analytics_stats/
+
+dash_parameters: &dash_parameters
+  pDashEventsTopic: ${dash_events_topic}
+  pDashApplication: ${dash_application}
+  pDashAssignmentGroup: ${dash_assignment_group}
+  pEnableDashNotif: ${enable_dash_notifications}
+  pEnableEmailNotif: ${enable_email_notifications}
+
+tags:
+  "SWA:BusinessService": ${business_service}
+  "SWA:Compliance": ${compliance}
+  "SWA:Confidentiality": ${confidentiality}
+  "SWA:CostCenter": ${cost_center}
+  "SWA:Environment": ${environment}
+  "SWA:Name": ${department}
+  "SWA:PID": ${swa_pid}
+  "CCPModuleName": ${module_name}
+  "CCPModuleVersion": ${module_version}
+  "CCPNamespace": ${namespace}
+
+lookups:
+  configs: ccplatcfnginlibs.lookups.ConfigsLookup
+  getDataProducerRole: decputilities.lookups.getDataProducerRole.Lookup
+
+pre_deploy:
+  # ccplatcfnginlibs version 5.2.0
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
+
+  # Runs poetry build, uploads glue code and packaged wheel
+  - path: hooks.upload_to_s3.hook
+    required: true
+    enabled: true
+    data_key: uploadGlueScripts
+    args:
+      local_dir: src/
+      aws_init_dir: *pGlueScriptKeyPrefix
+      bucket_name: *pS3ScriptBucket
+      tag: "*"
+      zip: True
+
+  # # Process lambdas into a zip file compatible w/ cfngin AWS::Serverless::Function 'CodeUri' command
+  # - path: 'runway.cfngin.hooks.awslambda.PythonFunction'
+  #   data_key: 'sns_alerts'
+  #   args:
+  #     bucket_name: *pS3ScriptBucket
+  #     docker:
+  #       disabled: true
+  #     runtime: 'python3.9' # the hook runs in 3.11; not the project
+  #     source_code: 'lambdas/sns_alerts'
+
+  # - path: 'runway.cfngin.hooks.awslambda.PythonFunction'
+  #   data_key: 'rejects_warnings_alerts'
+  #   args:
+  #     bucket_name: *pS3ScriptBucket
+  #     docker:
+  #       disabled: true
+  #     runtime: 'python3.9' # the hook runs in 3.11; not the project
+  #     source_code: 'lambdas/rejects_warnings_alerts'
+
+pre_destroy:
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
+
+post_deploy:
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
+
+post_destroy:
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
+
+stacks:
+  agbd-analytics-etl-glue:
+    enabled: true
+    template_path: cfngin/templates/agbd-analytics-etl-glue.j2
+    variables:
+      <<: [*common_parameters, *s3_parameters, *reject_parameters, *dash_parameters, *redshift_parameters, *moduleConfig]
+      # pSnsAlertsLambdaARN: ${output agbd-analytics-etl-sns-alerts.oAgbdAnalyticsEtlDashAlertsARN}
+    # requires:
+    #   - agbd-analytics-etl-sns-alerts
+  # cmdty-bags-sns-alerts:
+  #   enabled: true
+  #   template_path: cfngin/cloudformation/sns_alerts.yml
+  #   variables:
+  #     <<: [*common_parameters, *stats_parameters, *dash_parameters, *reject_parameters]
+  #     pDatalakeNamespace: ${datalake_namespace}
+  #     pCodeUriBucket: ${awslambda.S3Bucket sns_alerts}
+  #     pCodeUriKey: ${awslambda.S3Key sns_alerts}
+  # cmdty-bags-event-bridge:
+  #   enabled: true
+  #   template_path: 'cfngin/templates/agbd-bofl-etl-glue-event-bridge.j2'
+  #   requires:
+  #     - agbd-bofl-etl-sns-alerts
+  #     - agbd-bofl-etl-glue
+  #   variables:
+  #     <<: [*common_parameters, *moduleConfig, *stats_parameters, *dash_parameters, *reject_parameters]
+  #     pSnsAlertsLambdaARN: ${output agbd-bofl-etl-sns-alerts.oAgbdBoflEtlDashAlertsARN::region=${region}}
+
+  # sns-alerts:
+  #   enabled: true
+  #   template_path: 'cfngin/cloudformation/sns_alerts.yml'
+  #   variables:
+  #     <<: [*common_parameters, *reject_parameters, *dash_parameters]
+  #     pDatalakeNamespace: ${namespace}
+  #     pCodeUriBucket: ${awslambda.S3Bucket sns_alerts}
+  #     pCodeUriKey: ${awslambda.S3Key sns_alerts}
+  #     pSnsTopicArn: ${cfn ${namespace}-sns.oalertsnotifyARN::region=${region}}
+  #     pDASHSnsTopicARN: ${cfn EME-ClientAccountStack.CloudWatchMediumAlarmToSNSTopic::region=${region}}
+  #     # function name must match vEventBus.rules.targets.name in 100 yaml
+  #     pFunctionName: 'cmdty-bags-etl-dash-alerts'
+
+  # reject-warnings:
+  #     template_path: 'cfngin/cloudformation/rejects_warnings_alerts.yml'
+  #     variables:
+  #       <<: [*common_parameters, *stats_parameters, *dash_parameters]
+  #       pDatalakeNamespace: ${namespace}
+  #       pCodeUriBucket: ${awslambda.S3Bucket rejects_warnings_alerts}
+  #       pCodeUriKey: ${awslambda.S3Key rejects_warnings_alerts}
+  #       pSnsTopicArn: ${cfn ${namespace}-sns.orejectsalertsnotifyARN::region=${region}}

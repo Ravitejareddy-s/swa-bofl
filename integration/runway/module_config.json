@@ -1,0 +1,1 @@
+{"modules":{"400-s3-module":{"config":{},"group_id":"cloudCatalog","identifier":null,"module_name":null,"name":"cloud-common-s3-module","path":null,"version":"4.10.0"},"100-agbd-bofl-etl-module":{"config":{},"group_id":"cloudCatalog","identifier":null,"module_name":null,"name":"decp-agbd-analytics-etl-module","path":"local","version":"local"}},"region":"us-east-1","stages":[]}

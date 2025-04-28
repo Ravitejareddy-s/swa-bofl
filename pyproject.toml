@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "decp_agbd_analytics_etl_module"
+version = "0.0.1"
+description = "Module curates and processes data for AGBD Analytics"
+authors = ["Oracle Devs"]
+readme = "README.md"
+repository = "https://southwest.gitlab-dedicated.com/agbd/etl/modules/decp-agbd-analytics-etl-module"
+
+[tool.poetry.dependencies] # main dependency group
+python = "^3.9"
+
+[tool.poetry.group.deploy.dependencies]
+swa-runway = "^3.9.0"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^3.7.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.7"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "swa-releases"
+url = "https://nexus-tools.swacorp.com/repository/pypi-releases/simple"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "swa-pypi"
+url = "https://nexus-tools.swacorp.com/repository/pypi/simple"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "primary"

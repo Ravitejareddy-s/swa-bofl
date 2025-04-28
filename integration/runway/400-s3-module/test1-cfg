@@ -1,0 +1,18 @@
+vBucketList:
+- enableRequestMetrics: 'true'
+  enableServerAccessLogging: 'true'
+  lifecycleRules:
+  - id: ArchiveRule
+    status: Enabled
+    transitions:
+    - days: 90
+      storage: GLACIER
+    - days: 180
+      storage: DEEP_ARCHIVE
+  - expiredObjectDeleteMarker: true
+    id: DeleteMarkerExpirationRule
+    nonCurrentVersionExpirationInDays: 1
+    status: Enabled
+  name: agbd-analytics
+  versioning: Enabled
+

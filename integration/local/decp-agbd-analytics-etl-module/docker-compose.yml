@@ -1,0 +1,315 @@
+# This docker-compose config is used to execute the same functionality against a module
+# that is executed using the gitlab build pipelines.
+#
+# The following services are supported by the docker-compose config
+#
+# Integration Testing Functionality
+#
+#   The test-suite services use the configurations defined in the integration directory to deploy the module
+#   to AWS for running integration tests.
+#
+#   The test-suite only deploys one integration test namespace at a time to AWS. The default test namespace
+#   used is "test1". If the "test2" namespace is desired, the TEST_ENV=test2 env variable can be set to deploy,
+#   test, and destroy the test2 integration test. Currently, the gitlab pipelines only support test1 and test2
+#   namespaces for integration testing. Additional test namespaces can be added to the integration directory
+#   for local use but they will not run on gitlab.
+#
+#   The test-suite services use the runtests_local.sh script located at
+#   https://gitlab-tools.swacorp.com/swa-common/ccp/docker/met/-/blob/master/src/integration/runtests_local.sh
+#
+#   Variables that can be overridden in runtests_local.sh by exporting these environment variables
+#      AWS_REGION - If not set, "us-east-1" is used by default
+#      TO_BE_REPLACED_NS - Used to override the networking-tier-namespace value used when testing use of a vpc
+#                          deployed to a different namespace from the one used when deploying this module
+#      TEST_ENV - The test namespace to run for integration tests. If not set, "test1" is used
+#
+
+version: '3.9'
+
+x-variables:
+  environment: &env-vars
+    AWS_ACCESS_KEY_ID:
+    AWS_CONFIG_FILE: /aws/config
+    AWS_PROFILE: ${AWS_PROFILE:-default}
+    AWS_REGION: ${AWS_REGION:-us-east-1}
+    AWS_SECRET_ACCESS_KEY:
+    AWS_SESSION_TOKEN:
+    AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+    CCPLAT_LOG_LEVEL: ${CCPLAT_LOG_LEVEL:-INFO}
+    GIT_BRANCH: ${USER}-local
+    MODULENAME: decp-agbd-analytics-etl-module
+    PYTHON_VERSION: ${PYTHON_VERSION:-3.9}
+    NODE_VERSION:
+  volumes:
+    aws: &vol-aws
+      type: bind
+      source: ~/.aws
+      target: /aws
+    awssaml: &vol-awssaml
+      type: bind
+      source: ~/.awssaml
+      target: /home/swa-user/.awssaml
+    cwd: &vol-cwd
+      type: bind
+      source: ${PWD}
+      target: /work
+    pip: &vol-pip
+      type: volume
+      source: ccp-module-cache-pip
+      target: /home/swa-user/.cache/pip
+    poetry: &vol-poetry
+      type: volume
+      source: ccp-module-cache-poetry
+      target: /home/swa-user/.cache/pypoetry
+    venv: &vol-venv
+      type: volume
+      source: ccp-module-venv
+      target: /work/.venv
+    # two delow are for auth access to jupyter notebook but not pytest
+    glue_image_aws: &glue-image-aws
+      type: bind
+      source: ~/.aws
+      target: /home/glue_user/.aws
+    glue_image_aws_saml: &glue-image-aws_saml
+      type: bind
+      source: ~/.awssaml
+      target: /home/glue_user/.awssaml
+    # everything below is for binding code files in glue image
+    glue_image_cwd: &glue-image-cwd
+      type: bind
+      source: ./src
+      target: /home/glue_user/workspace/src
+    glue_image_jup: &glue-image-jup
+      type: bind
+      source: ./notebooks
+      target: /home/glue_user/workspace/jupyter_workspace/
+    glue_image_pytest: &glue-image-pytest
+      type: bind
+      source: ./test
+      target: /home/glue_user/workspace/test
+
+services:
+
+  dependency-check:
+    image: owasp/dependency-check:latest@sha256:c8805938aa26bd6f57162d3000ddca2135319a545ab5ed2ac928b4e3bd40bd87
+    user: root
+    volumes:
+      - *vol-cwd
+      - ./reports/dependency-check/data:/usr/share/dependency-check/data
+      - ./reports/dependency-check/report:/report
+    environment:
+      <<: *env-vars
+    entrypoint:
+      - /usr/share/dependency-check/bin/dependency-check.sh
+      - --scan
+      - /work
+      - --format
+      - ALL
+      - --project
+      - $$MODULENAME
+      - --out
+      - /report
+      - --enableExperimental
+  test-coverage:
+    build:
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION-3.9}
+      context: .
+      dockerfile: Dockerfile.local
+    volumes:
+      - *vol-cwd
+      # - *vol-pip
+      # - *vol-poetry
+      # - *vol-venv
+    working_dir: /work
+    environment:
+      <<: *env-vars
+    command:
+      - /bin/bash
+      - --login
+      - -c
+      - |
+        set -ex
+        bash test-coverage.sh
+  test-suite:
+    image: 290503755741.dkr.ecr.us-east-1.amazonaws.com/swa-common/ccp/docker/met:3.31.3
+    volumes:
+      - *vol-aws
+      - *vol-awssaml
+      - *vol-cwd
+      # - *vol-pip
+      # - *vol-poetry
+      # - *vol-venv
+    working_dir: /work/integration
+    environment:
+      <<: *env-vars
+      AWS_SDK_LOAD_CONFIG: 1'
+      MET_LOG_LEVEL: DEBUG
+      TEST_DEPLOY: 'true'
+      TEST_RUN: 'true'
+      TEST_DESTROY: 'true'
+      TEST_ENV: ${TEST_ENV:-test1}
+      TEST_TO_RUN:
+      SKIP_PRE_DEPLOY:
+      INTEGRATION_TEST_DISABLED: 'False'
+      TO_BE_REPLACED_NS:
+      LAYER_DEPS_TARGET_PATH:
+    command:
+      - /bin/bash
+      - --login
+      - -c
+      - |
+        cp -rf /integration/* .
+        ./runtests_local.sh
+  test-suite-deploy:
+    image: 290503755741.dkr.ecr.us-east-1.amazonaws.com/swa-common/ccp/docker/met:3.31.3 # 4.4.1
+    volumes:
+      - *vol-aws
+      - *vol-awssaml
+      - *vol-cwd
+      - *vol-pip
+      - *vol-poetry
+      - *vol-venv
+    working_dir: /work/integration
+    environment:
+      <<: *env-vars
+      AWS_CONSOLE_URL:
+      AWS_SDK_LOAD_CONFIG: '1'
+      INTEGRATION_TEST_DISABLED:
+      SKIP_PRE_DEPLOY:
+      TEST_DEPLOY: 'true'
+      TEST_DESTROY: 'false'
+      TEST_ENV: ${TEST_ENV:-test1}
+      TEST_RUN: 'false'
+      TO_BE_REPLACED_NS:
+    command:
+      - /bin/bash
+      - --login
+      - -c
+      - |
+        cp -rf /integration/* .
+        cd /work && zip -r src.zip ./src/* && mv src.zip ./src
+        cd /work/integration && ./runtests_local.sh
+
+  test-suite-destroy:
+    image: 290503755741.dkr.ecr.us-east-1.amazonaws.com/swa-common/ccp/docker/met:3.31.3
+    volumes:
+      - *vol-aws
+      - *vol-awssaml
+      - *vol-cwd
+      - *vol-pip
+      - *vol-poetry
+      - *vol-venv
+    working_dir: /work/integration
+    environment:
+      <<: *env-vars
+      AWS_CONSOLE_URL:
+      AWS_SDK_LOAD_CONFIG: '1'
+      INTEGRATION_TEST_DISABLED:
+      SKIP_PRE_DEPLOY:
+      TEST_DEPLOY: 'false'
+      TEST_DESTROY: 'true'
+      TEST_ENV: ${TEST_ENV:-test1}
+      TEST_RUN: 'false'
+      TO_BE_REPLACED_NS:
+    command:
+      - /bin/bash
+      - --login
+      - -c
+      - |
+        cp -rf /integration/* .
+        ./runtests_local.sh
+  test-suite-run:
+    image: 290503755741.dkr.ecr.us-east-1.amazonaws.com/swa-common/ccp/docker/met:3.31.3
+    volumes:
+      - *vol-aws
+      - *vol-awssaml
+      - *vol-cwd
+      # - *vol-pip
+      # - *vol-poetry
+      # - *vol-venv
+    working_dir: /work/integration
+    environment:
+      <<: *env-vars
+      AWS_CONSOLE_URL:
+      AWS_SDK_LOAD_CONFIG: '1'
+      INTEGRATION_TEST_DISABLED: 'False'
+      SKIP_PRE_DEPLOY:
+      TEST_DEPLOY: 'false'
+      TEST_DESTROY: 'false'
+      TEST_ENV: ${TEST_ENV:-test1}
+      TEST_RUN: 'true'
+      TEST_TO_RUN:
+      TO_BE_REPLACED_NS:
+    command:
+      - /bin/bash
+      - --login
+      - -c
+      - |
+        cp -rf /integration/* .
+        ./runtests_local.sh
+  veracode:
+    image: 290503755741.dkr.ecr.us-east-1.amazonaws.com/ccplatbuild/veracode-scanner:latest@sha256:b325508bb7ea959f0cdc75bc1dae0dcf5d50443489747a59a7aed3b226df7372
+    volumes:
+      - ./:/src
+    environment:
+      <<: *env-vars
+      VID:
+      VKEY:  # cspell: disable-line
+      CREATE_PROFILE: 'false'
+      BUILD_NUMBER: 0.0.1
+      APPNAME: decp-agbd-analytics-etl-module
+      CRITICALITY: High
+    command:
+      - src
+  glue_jupyter_lab_agbd_analytics:
+    image: amazon/aws-glue-libs:glue_libs_4.0.0_image_01
+    container_name: glue_jupyter_lab
+    ports:
+      - 4040:4040   # spark-ui
+      - 18080:18080 # spark history server
+      - 8998:8998   # livy sever ui
+      - 8888:8888   # jupyter lab
+    volumes:
+      - *vol-aws
+      - *vol-awssaml
+      - *glue-image-aws
+      - *glue-image-aws_saml
+      - *glue-image-cwd
+      - *glue-image-jup
+      - *glue-image-pytest
+    working_dir: /home/glue_user/workspace/
+    environment:
+      AWS_PROFILE: 437298529078-SWACSDeveloper
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      DISABLE_SSL: true
+      DATALAKE_FORMATS: hudi
+      <<: *env-vars
+    command: /home/glue_user/jupyter/jupyter_start.sh -e DATALAKE_FORMATS=hudi
+      # NOTE: Use 'make exec-jupyter-container' to exec in to container once started
+      # Then run any commands below inside container
+      # Runs single scripts: spark-submit /home/glue_user/workspace/src/$SCRIPT_FILE_NAME
+      # Runs interactive shell: pyspark
+      # Runs tests: pytest ./test/test_sample.py
+
+# [OPTIONAL] docker volumes for caching. uncomment this and other volume related sections to use.
+# volumes:
+#   # Volumes are reused across module for improved performance.
+#   # If they do not already exist, they must be created first or docker will raise an error.
+#   #
+#   #     docker volume create <name>
+#   #
+#   # If one of the cached tools raises an error, try deleting and recreating the volume.
+#   #
+#   #     docker volume remove <name>
+#   #
+volumes:
+  ccp-module-cache-pip:
+    external: true
+    name: ccp-module-cache-pip
+  ccp-module-cache-poetry:
+    external: true
+    name: ccp-module-cache-poetry
+  ccp-module-venv:
+    external: true
+    name: ccp-module-venv

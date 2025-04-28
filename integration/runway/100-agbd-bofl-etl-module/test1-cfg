@@ -1,0 +1,55 @@
+base_s3_path: s3://datalake-us-east-1-dev1-curated-secure/commodity/entp-agbd/agbd-analytics
+checkpoint_dir: s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/checkpoint
+datalake_entp_database: datalake_dev1_entp_agbd
+datalake_source_database: datalake_dev1_agbd
+datalake_source_table_name: curatedsecure_bag_on_flight_leg_state_v1_prqt
+extra-jars:
+  hudi-spark3-bundle-0.13.1.jar: null
+framework_libs:
+  src.zip: null
+redshift_checkpoint_dir: s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/data/rs-load-checkpoint/
+redshift_database: swadb
+redshift_iam_role: arn:aws:iam::437298529078:role/idfp-dev1-dwcp-redshift-etl-role
+redshift_region: us-east-1
+redshift_secret: dev1-dwcp-redshift-dwcp_cmdty_load-etl
+redshift_stg_schema: cdw_st
+redshift_target_schema: cdw_db
+redshift_temp_dir: s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/rs-load-temp-dir
+rejected_bucket: idfp-us-east-1-dev1-decp-commodity
+vEtlJobs:
+  RedshiftJobs:
+  - ScriptLocation: agbd-bofl-evnt-analytics-rs-load
+    glueArguments:
+      additional-python-modules: redshift_connector
+      checkpoint_dir: s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/checkpoint
+      hudi_begin_instanttime: None
+      hudi_database: datalake_dev1_entp_agbd
+      hudi_s3_path: s3://datalake-us-east-1-dev1-curated-secure/commodity/entp-agbd/agbd-analytics
+      hudi_table_name: agbd_bofl_evnt
+      rs_database: swadb
+      rs_iam_role: arn:aws:iam::437298529078:role/idfp-dev1-dwcp-redshift-etl-role
+      rs_region: us-east-1
+      rs_secret_name: dev1-dwcp-redshift-dwcp_cmdty_load-etl
+      rs_stg_tbl: cdw_st.agbd_bofl_evnt
+      rs_target_tbl: cdw_db.agbd_bofl_evnt
+      rs_tmp_s3_path: s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/rs-load-temp-dir
+    name: agbd-bofl-evnt-analytics-rs-load
+    pyFiles:
+      src.zip: null
+  jobs:
+  - ScriptLocation: agbd-bofl-evnt-analytics-hudi-load
+    WorkerType: G.2X
+    glueArguments:
+      base_s3_path: s3://datalake-us-east-1-dev1-curated-secure/commodity/entp-agbd/agbd-analytics
+      bookmark: agbd-bofl-evnt-hudi-load/
+      job-bookmark-option: job-bookmark-enable
+      push_down_begin: 2025-04-01
+      push_down_end: 2025-04-20
+      source_database: datalake_dev1_agbd
+      source_table_name: curatedsecure_bag_on_flight_leg_state_v1_prqt
+      target_db: datalake_dev1_entp_agbd
+      target_table_name: agbd_bofl_evnt
+    name: agbd-bofl-evnt-analytics-hudi-load
+    pyFiles:
+      src.zip: null
+

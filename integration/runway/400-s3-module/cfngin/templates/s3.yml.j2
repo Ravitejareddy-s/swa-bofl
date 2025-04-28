@@ -1,0 +1,587 @@
+
+{%- macro format_name(name) -%}
+{{ name | replace('-','') | truncate(92, true, '') }}
+{%- endmacro -%}
+
+{%- macro format_bool(bool) -%}
+{{ bool | string | lower }}
+{%- endmacro -%}
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Creates N number of S3 buckets'
+
+Outputs:
+{% for bucket in variables.vBucketList['vBucketList'] %}
+  o{{format_name(bucket.name)}}Bucket:
+    Value: !Ref r{{format_name(bucket.name)}}Bucket
+    Description: Name of S3 buckets created
+{% if 'accessPoints' in bucket %}
+{% for ap in bucket.accessPoints %}
+  o{{format_name(ap.name)}}AccessPoint:
+    Value: {{ap.name}}
+    Value: !Ref rS3AccessPoint{{format_name(ap.name)}}
+    Description: Name of S3 access points created
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+Parameters:
+  pNamespace:
+    Type: String
+    Description: The Namespace of the S3 buckets
+    AllowedPattern: '[a-z][a-z0-9-]*'
+    ConstraintDescription: Must start with a letter and be all lowercase
+  pDepartment:
+    Type: String
+    Description: Name of the department
+  pRegion:
+    Type: String
+    Description: AWS region
+  pPrincipalOrgID:
+    Type: String
+    Description: SWA Organization ID
+    Default: "o-sbfm45508y"
+{% for bucket in variables.vBucketList['vBucketList'] %}
+{% if bucket.crossAccountReplication is defined %}
+{% if bucket.crossAccountReplication.enableAsDestinationOrSource == 'source' %}
+  p{{format_name(bucket.name)}}SsmKeyArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '{{bucket.crossAccountReplication.destinationKeySsm}}'
+    NoEcho: true
+{% endif %}
+{% endif %}
+{% endfor %}
+
+Resources:
+{% for bucket in variables.vBucketList['vBucketList'] %}
+  r{{format_name(bucket.name)}}Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+{% if 'corsRules' in bucket %}
+{% set cors_vars = bucket.corsRules[0] %}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+{% for header in cors_vars['allowedHeaders'] %}
+              - '{{header}}'
+{% endfor %}
+            AllowedMethods:
+{% for method in cors_vars['allowedMethods'] %}
+              - {{method}}
+{% endfor %}
+            AllowedOrigins:
+{% for origin in cors_vars['allowedOrigins'] %}
+              - {{origin}}
+{% endfor %}
+
+{% if 'exposedHeaders' in cors_vars %}
+            ExposedHeaders:
+{% for header in cors_vars['exposedHeaders'] %}
+              - {{header}}
+{% endfor %}
+{%endif%}
+            MaxAge: {{cors_vars['maxAge']}}
+{% endif %}
+
+{% if bucket.crossAccountReplication  is defined %}
+{% if bucket.crossAccountReplication.enableAsDestinationOrSource == 'source' %}
+      ReplicationConfiguration:
+        Role: !GetAtt r{{format_name(bucket.name)}}ReplicationRole.Arn
+        Rules:
+          - Id: {{bucket.crossAccountReplication.destinationFullBucketName}}-cross-account
+            Priority: 1
+            Destination:
+              Account: "{{bucket.crossAccountReplication.destinationBucketAccountId}}"
+              Bucket: arn:aws:s3:::{{bucket.crossAccountReplication.destinationFullBucketName}}
+              AccessControlTranslation:
+                Owner: Destination
+              EncryptionConfiguration:
+                ReplicaKmsKeyID: !Ref p{{format_name(bucket.name)}}SsmKeyArn
+              ReplicationTime:
+                Status: Enabled
+                Time:
+                  Minutes: 15
+              Metrics:
+                Status: Enabled
+                EventThreshold:
+                  Minutes: 15
+            Status: Enabled
+            SourceSelectionCriteria:
+              SseKmsEncryptedObjects:
+                Status: Enabled
+            Filter:
+              Prefix: '{{bucket.crossAccountReplication.destinationS3FilterPrefix}}'
+            DeleteMarkerReplication:
+              Status: Disabled
+{% endif %}
+{% endif %}
+      AccessControl: 'BucketOwnerFullControl'
+
+{% if bucket.eventNotifications is defined %}
+      NotificationConfiguration:
+{% if format_bool(bucket.eventNotifications.eventBridgeEnabled) == 'true' %}
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+{% endif %}
+
+{% if bucket.eventNotifications.lambdaConfigs is defined %}
+        LambdaConfigurations:
+{% for lambdaEvent in bucket.eventNotifications.lambdaConfigs %}
+          - Event: {{lambdaEvent.event}}
+            Function: {{lambdaEvent.resourceArn}}
+{% endfor %}
+{% endif %}
+
+{% if bucket.eventNotifications.topicConfigs is defined %}
+        TopicConfigurations:
+{% for topicEvent in bucket.eventNotifications.topicConfigs %}
+          - Event: {{topicEvent.event}}
+            Topic: {{topicEvent.resourceArn}}
+{% endfor %}
+{% endif %}
+
+{% if bucket.eventNotifications.queueConfigs is defined %}
+        QueueConfigurations:
+{% for queueEvent in bucket.eventNotifications.queueConfigs %}
+          - Event: {{queueEvent.event}}
+            Queue: {{queueEvent.resourceArn}}
+{% endfor %}
+{% endif %}
+
+{% endif %}
+      BucketName: !Join ['-', [!Ref pDepartment, !Ref pRegion, !Ref pNamespace, {{bucket.name}}]]
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: {{ format_bool(bucket.bucketKeyEnabled|default("false", true)) }}
+            ServerSideEncryptionByDefault:
+{% if bucket.crossAccountReplication is not defined %}
+{% if format_bool(bucket.isLogDestinationBucket) == 'true' %}
+              SSEAlgorithm: AES256
+{% else %}
+              SSEAlgorithm: aws:kms
+{% if bucket.encryptionKey is defined %}
+              KMSMasterKeyID: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/{{bucket.encryptionKey}}
+{% else %}
+              KMSMasterKeyID:
+                Fn::ImportValue:
+                  Fn::Sub: ${AWS::AccountId}-${AWS::Region}-swa-kms-key-arn
+{% endif %}
+{% endif %}
+{% endif %}
+{% if bucket.crossAccountReplication is defined %}
+{% if bucket.crossAccountReplication.enableAsDestinationOrSource == 'destination' %}
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt r{{format_name(bucket.name)}}KMSKey.Arn
+{% endif %}
+{% if bucket.crossAccountReplication.enableAsDestinationOrSource == 'source' %}
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::ImportValue:
+                  Fn::Sub: ${AWS::AccountId}-${AWS::Region}-swa-kms-key-arn
+{% endif %}
+{% endif %}
+{% if 'inventoryConfigurations' in bucket %}
+      InventoryConfigurations:
+{% for inventoryConfig in bucket.inventoryConfigurations %}
+        - Id: {{inventoryConfig.id}}
+          Destination:
+            BucketArn: {{inventoryConfig.destinationBucketArn}}
+            Format: {{inventoryConfig.format}}
+{% if 'destinationPrefix' in inventoryConfig %}
+            Prefix: {{inventoryConfig.destinationPrefix}}
+{% endif %}
+{% if 'inventoryPrefix' in inventoryConfig %}
+          Prefix: {{inventoryConfig.inventoryPrefix}}
+{% endif %}
+{% if 'optionalFields' in inventoryConfig %}
+          OptionalFields: {{inventoryConfig.optionalFields}}
+{% endif %}
+          IncludedObjectVersions: {{inventoryConfig.objectVersions}}
+          Enabled: {{inventoryConfig.enabled}}
+          ScheduleFrequency: {{inventoryConfig.schedule}}
+{% endfor %}
+{% endif %}
+{% if 'lifecycleRules' in bucket %}
+      LifecycleConfiguration:
+        Rules:
+{% for rule in bucket.lifecycleRules %}
+          - Id: {{rule.id}}
+            Status: {{rule.status or 'Enabled'}}
+{% if 'prefix' in rule %}
+            Prefix: {{rule.prefix}}
+{% endif %}
+{% if 'expirationInDays' in rule %}
+            ExpirationInDays: {{rule.expirationInDays}}
+{% endif %}
+{% if 'nonCurrentVersionExpirationInDays' in rule %}
+            NoncurrentVersionExpirationInDays: {{rule.nonCurrentVersionExpirationInDays}}
+{% endif %}
+{% if 'transitions' in rule %}
+            Transitions:
+{% for transition in rule.transitions %}
+              - StorageClass: {{transition.storage}}
+                TransitionInDays: {{transition.days}}
+{% endfor %}
+{% endif %}
+{% if 'expiredObjectDeleteMarker' in rule %}
+            ExpiredObjectDeleteMarker: {{rule.expiredObjectDeleteMarker}}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if format_bool(bucket.enableRequestMetrics) == 'true' %}
+      MetricsConfigurations:
+        - Id: EntireBucket
+{% endif %}
+
+{% if format_bool(bucket.enableServerAccessLogging) == 'true' %}
+      LoggingConfiguration:
+        DestinationBucketName:
+          !Join ['-', ['ec-s3-access-logs', !Ref AWS::AccountId, !Ref AWS::Region]]
+
+        LogFilePrefix: !Join ['', [!Ref AWS::AccountId, '/', !Ref AWS::Region, '/', !Ref pDepartment, '-', !Ref pRegion, '-', !Ref pNamespace, '-',{{bucket.name}}, '/']]
+{% endif %}
+
+      VersioningConfiguration:
+        Status: {{bucket.versioning}}
+{% if 'tags' in bucket %}
+      Tags:
+{% for tag in bucket['tags'] %}
+          - Key: {{tag['Key']}}
+            Value: {{tag['Value']}}
+{% endfor %}
+{% endif %}
+{% if 'accessPoints' in bucket %}
+{% for ap in bucket.accessPoints %}
+  rS3AccessPoint{{format_name(ap.name)}}:
+    Type: AWS::S3::AccessPoint
+    Properties:
+      Bucket: !Ref r{{format_name(bucket.name)}}Bucket
+      Name: {{ap.name}}
+{% if ap.vpcId is defined %}
+      VpcConfiguration:
+        VpcId: {{ap.vpcId}}
+      NetworkOrigin: VPC
+{% else %}
+      NetworkOrigin: Internet
+{% endif %}
+      Policy:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+            - s3:GetObject
+{% if ap.writeAccess is defined and format_bool(ap.writeAccess) == 'true' %}
+            - s3:PutObject
+{% endif %}
+            Effect: Allow
+            Resource:
+{% if not ap.bucketPrefix == "" %}
+{% set bucket_prefix =  "/" ~ ap.bucketPrefix %}
+{% endif %}
+              - !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/{{ap.name}}/object{{bucket_prefix}}/*'
+            Principal:
+{% if 'roles' in ap %}
+              AWS:
+{% for roleElement in ap.roles %}
+                - {{roleElement}}
+{% endfor %}
+{% else %}
+              AWS: {{ap.role}}
+{% endif %}
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref pPrincipalOrgID
+          - Action:
+              - s3:ListBucket
+            Effect: Allow
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/{{ap.name}}'
+            Principal:
+{% if 'roles' in ap %}
+              AWS:
+{% for roleElement in ap.roles %}
+                - {{roleElement}}
+{% endfor %}
+{% else %}
+              AWS: {{ap.role}}
+{% endif %}
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref pPrincipalOrgID
+{% endfor %}
+{% endif %}
+
+  r{{format_name(bucket.name)}}BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref r{{format_name(bucket.name)}}Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'Enforce HTTPS Connection'
+            Effect: Deny
+            Principal:
+              "*"
+            Action: 's3:*'
+            Resource:
+              Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+        {% if bucket.bucket_policy is defined %}
+        {% for policy in bucket.bucket_policy %}
+          - Action:
+            {% for action in policy.actions %}
+              - {{ action }}
+            {% endfor %}
+            Effect: {{ policy.get("effect", "Allow") }}
+            {% if policy.principal is defined %}
+            Principal: {{ policy.principal }}
+            {% endif %}
+            Resource:
+              - Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}/*'
+              - Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}'
+            {% if policy.sid is defined %}
+            Sid: {{ policy.sid }}
+            {% endif +%}
+        {% endfor %}
+        {% endif %}
+{% if bucket.AccessPointConfig  is defined %}
+{% if format_bool(bucket.AccessPointConfig) == 'true' %}
+          - Sid: 'Delegate access control to access points'
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:ListBucket"
+            Resource:
+              - Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}/*'
+              - Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}'
+            Condition:
+              StringEquals:
+                s3:DataAccessPointAccount: !Ref AWS::AccountId
+{% endif %}
+{% endif %}
+{% if bucket.crossAccountReplication  is defined %}
+{% if bucket.crossAccountReplication.enableAsDestinationOrSource == 'destination' %}
+          - Sid: 'S3AllowObjectReplication'
+            Effect: Allow
+            Principal:
+              "*"
+            Action:
+              - 's3:GetBucketVersioning'
+              - 's3:PutBucketVersioning'
+              - 's3:ReplicateObject'
+              - 's3:ObjectOwnerOverrideToBucketOwner'
+            Resource:
+              - Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}/*'
+              - Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}'
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Sub "arn:aws:iam::{{bucket.crossAccountReplication.sourceBucketAccountId}}:role/s3-{{format_name(bucket.crossAccountReplication.sourceBucketName)}}-{{variables.pEnvName|lower}}-${AWS::Region}"
+
+  r{{format_name(bucket.name)}}KMSKey:
+    # Per SWA standard Symmetric Key Encryption Management v3.0
+    Type: 'AWS::KMS::Key'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: "Have checks put it place to only allow accounts that belong to the org to use the key"
+    Properties:
+      Description: 'SWA authorized KMS key for Cross Account Replication'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: "s3-{{format_name(bucket.name)}}-kms-key-policy"
+        Statement:
+          - Sid: "KMSKeyAdministration"
+            Effect: "Allow"
+            Principal:
+              AWS: !Ref AWS::AccountId
+            Action:
+              - "kms:Create*"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:PrincipalArn:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/SWAOrganizationAccountAccessRole"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/swa/SWACSBreakGlassAdmin"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/swa/SWACSBreakGlassSSH"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/swa/SWACSCloudAdmin"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/swa/SWACSDeveloper"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/swa/SWACSOperations"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/swa/SWAECGitlabDeployRole"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/swa/SWAECJenkinsDeployRole-*"
+          - Sid: "SourceCrossAccountRolePermissions"
+            Effect: "Allow"
+            Principal:
+              AWS: "{{bucket.crossAccountReplication.sourceBucketAccountId}}"
+            Action:
+              - "kms:Encrypt"
+              - "kms:ReEncrypt*"
+              - "kms:GenerateDataKey*"
+              - "kms:DescribeKey"
+              - "kms:List*"
+              - "kms:Get*"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"
+                aws:PrincipalOrgId: !Ref pPrincipalOrgID
+              ArnLike:
+                aws:PrincipalArn: !Sub "arn:aws:iam::{{bucket.crossAccountReplication.sourceBucketAccountId}}:role/s3-{{format_name(bucket.crossAccountReplication.sourceBucketName)}}-{{variables.pEnvName|lower}}-${AWS::Region}"
+          - Sid: "AllowLocalKeyUsage"
+            Effect: "Allow"
+            Principal:
+              AWS: !Ref AWS::AccountId
+            Action:
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncrypt*"
+              - "kms:GenerateDataKey*"
+              - "kms:DescribeKey"
+              - "kms:List*"
+              - "kms:Get*"
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+          - Sid: S3PublishToEncryptedResources
+            Principal:
+              Service: "s3.amazonaws.com"
+            Effect: Allow
+            Action:
+              - kms:GenerateDataKey*
+              - kms:Decrypt
+            Resource: "*"
+
+  r{{format_name(bucket.name)}}KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/swa_s3_{{format_name(bucket.name)}}_kms
+      TargetKeyId: !Ref r{{format_name(bucket.name)}}KMSKey
+{% endif %}
+{% if bucket.crossAccountReplication.enableAsDestinationOrSource == 'source' %}
+  r{{format_name(bucket.name)}}ReplicationRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+        - id: W28
+          reason: This resource needs explicit name
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: s3.amazonaws.com
+          Action: sts:AssumeRole
+      Description: Service role to replicate objects from {{format_name(bucket.name)}} bucket
+      MaxSessionDuration: 14400
+      Path: /
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/swa/SWACSPermissionsBoundary"
+      RoleName: !Sub "s3-{{format_name(bucket.name)}}-{{variables.pEnvName|lower}}-${AWS::Region}"
+      Policies:
+        - PolicyName: {{format_name(bucket.name)}}InlinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: GetSourceS3BucketPermissions
+              Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:GetReplicationConfiguration
+                - s3:GetObjectVersionForReplication
+                - s3:GetObjectVersionAcl
+                - s3:GetObjectVersionTagging
+                - s3:GetObjectRetention
+                - s3:GetObjectLegalHold
+              Resource:
+                - !Join ['', ["arn:aws:s3:::", !Sub "${pDepartment}-", !Sub "${pRegion}-", !Sub "${pNamespace}-", {{bucket.name}}, "/*"]]
+                - !Join ['', ["arn:aws:s3:::", !Sub "${pDepartment}-", !Sub "${pRegion}-", !Sub "${pNamespace}-", {{bucket.name}}]]
+            - Sid: S3ReplicationPermissionsToDestination
+              Effect: Allow
+              Action:
+                - s3:ReplicateObject
+                - s3:ReplicateDelete
+                - s3:ReplicateTags
+                - s3:GetObjectVersionTagging
+                - s3:ObjectOwnerOverrideToBucketOwner
+              Condition:
+                StringLikeIfExists:
+                  s3:x-amz-server-side-encryption:
+                  - aws:kms
+                  - AES256
+              Resource: arn:aws:s3:::{{bucket.crossAccountReplication.destinationFullBucketName}}/*
+            - Sid: SourceKMSKeyPermissions
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+              Condition:
+                StringLike:
+                  kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                  kms:EncryptionContext:aws:s3:arn:
+                  - !Join ['', ["arn:aws:s3:::", !Sub "${pDepartment}-", !Sub "${pRegion}-", !Sub "${pNamespace}-", {{bucket.name}}, "/*"]]
+              Resource:
+              - Fn::ImportValue:
+                  Fn::Sub: ${AWS::AccountId}-${AWS::Region}-swa-kms-key-arn
+            - Sid: DestinationKMSKeyPermissions
+              Effect: Allow
+              Action:
+                - kms:Encrypt
+              Condition:
+                StringLike:
+                  kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                  kms:EncryptionContext:aws:s3:arn:
+                  - arn:aws:s3:::{{bucket.crossAccountReplication.destinationFullBucketName}}/*
+              Resource:
+              - !Ref p{{format_name(bucket.name)}}SsmKeyArn
+{% endif %}
+{% endif %}
+{% if 'inventoryDestination' in bucket %}
+          - Sid: S3InventoryDestinationPolicy
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: s3:PutObject
+            Resource:
+              - Fn::Sub: '${r{{format_name(bucket.name)}}Bucket.Arn}/*'
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+{% for sourceBucket in bucket.inventoryDestination %}
+                  - arn:aws:s3:::{{sourceBucket.name}}
+{% endfor %}
+              StringEquals:
+                aws:SourceAccount:
+{% for sourceBucket in bucket.inventoryDestination %}
+{% if 'sourceAccount' in sourceBucket %}
+                  - {{sourceBucket.sourceAccount}}
+{% endif %}
+{% endfor %}
+                s3:x-amz-acl: bucket-owner-full-control
+
+{% endif %}
+{% endfor %}

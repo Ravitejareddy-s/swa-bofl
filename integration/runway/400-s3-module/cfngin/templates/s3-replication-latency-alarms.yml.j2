@@ -1,0 +1,277 @@
+{%- macro format_name(name) -%}
+{{ name | replace('-','') | truncate(92, "true", '') }}
+{%- endmacro -%}
+
+# The variables used in the s3-sftp template are named with the following convention
+#   Variables that start with a c are conditions
+#   Variables that start with a r are resources
+#   Variables that start with a p are parameters
+#   Variables that start with a o are outputs
+
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Creates and Configures Replication Latency Alarms for the S3 Module'
+
+{% set dept = variables.pDepartment -%}
+{%- set reg = variables.pRegion -%}
+{%- set ns = variables.pNamespace -%}
+{%- set bucketNamePrefix = [dept, reg, ns]|join("-") %}
+{%- set svc_console_grp = variables.pServiceConsoleGroup -%}
+
+Conditions:
+{%- for bucket in variables.vBucketList['vBucketList'] %}
+{%- set AlarmsHigh = "false" %}
+{%- set AlarmsMedium = "false" %}
+{%- set AlarmsLow = "false" %}
+{%- set CrossRegionEnabled = "false" %}
+{%- if bucket["Alarms"] is defined %}
+{%- if bucket["Alarms"]["ReplicationLatency"] is defined %}
+{%- if bucket["Alarms"]["ReplicationLatency"]["High"] is defined %}
+{%-   set AlarmsHigh = "true" %}
+{%- endif %}
+{%- if bucket["Alarms"]["ReplicationLatency"]["Medium"] is defined %}
+{%-   set AlarmsMedium = "true" %}
+{%- endif %}
+{%- if bucket["Alarms"]["ReplicationLatency"]["Low"] is defined %}
+{%-   set AlarmsLow = "true" %}
+{%- endif %}
+{%- endif %}
+{%- endif %}
+{%- if bucket.crossRegion %}
+{%-   set CrossRegionEnabled = "true" %}
+{%- endif %}
+
+  c{{format_name(bucket.name)}}AlarmHighConfigured: !Equals [ "true", {{ AlarmsHigh }} ]
+  c{{format_name(bucket.name)}}AlarmMediumConfigured: !Equals [ "true", {{ AlarmsMedium }} ]
+  c{{format_name(bucket.name)}}AlarmLowConfigured: !Equals [ "true", {{ AlarmsLow }} ]
+  c{{format_name(bucket.name)}}CrossRegionEnabled: !Equals [ "true", {{ CrossRegionEnabled }} ]
+  c{{format_name(bucket.name)}}AlarmHigh: !And
+    - !Condition c{{format_name(bucket.name)}}AlarmHighConfigured
+    - !Condition c{{format_name(bucket.name)}}CrossRegionEnabled
+  c{{format_name(bucket.name)}}AlarmMedium: !And
+    - !Condition c{{format_name(bucket.name)}}AlarmMediumConfigured
+    - !Condition c{{format_name(bucket.name)}}CrossRegionEnabled
+  c{{format_name(bucket.name)}}AlarmLow: !And
+    - !Condition c{{format_name(bucket.name)}}AlarmLowConfigured
+    - !Condition c{{format_name(bucket.name)}}CrossRegionEnabled
+{%- endfor %}
+
+Resources:
+{%- for bucket in variables.vBucketList['vBucketList'] %}
+{%- set bucketName = [bucketNamePrefix, bucket.name]|join("-") %}
+{%- set destBucketName = [dept, bucket.crossRegion, ns, bucket.name]|join("-") %}
+{%- set ruleId = [bucketName, "replication"]|join("-") %}
+{%- set CrossAccountEnabled = "false" %}
+{%- set CrossAccountBucketName = "" %}
+{%- set DestinationAccountId = "" %}
+{%- set CrossAccountRuleId = "" %}
+{%- if bucket.crossAccountReplication is defined and bucket.crossAccountReplication.enableAsDestinationOrSource == 'source' %}
+{%-   set CrossAccountEnabled = "true" %}
+{%- endif %}
+{%- if CrossAccountEnabled == 'true' %}
+{%- set CrossAccountBucketName = bucket.crossAccountReplication.destinationFullBucketName %}
+{%- set DestinationAccountId = bucket.crossAccountReplication.destinationBucketAccountId %}
+{%- set CrossAccountRuleId = [CrossAccountBucketName, "cross-account"]|join("-") %}
+{%- endif %}
+{%- set EvaluationPeriods = 1 %}
+{%- set HighThreshold = 0 %}
+{%- set MediumThreshold = 0 %}
+{%- set LowThreshold = 0 %}
+{%- set assignment_grp = svc_console_grp -%}
+{%- set application = svc_console_grp -%}
+{%- if bucket["Alarms"] is defined %}
+{%- if bucket["Alarms"]["AssignmentGroup"] is defined  -%}
+{%- set assignment_grp = bucket["Alarms"]["AssignmentGroup"] -%}
+{%- set application = bucket["Alarms"]["AssignmentGroup"] -%}
+{%- endif -%}
+{%- if bucket["Alarms"]["Application"] is defined  -%}
+{%- set application = bucket["Alarms"]["Application"] -%}
+{%- endif -%}
+{%- if bucket["Alarms"]["ReplicationLatency"] is defined  %}
+{%-   set EvaluationPeriods = bucket["Alarms"]["ReplicationLatency"]["EvaluationPeriods"] or 1 %}
+{%-   set HighThreshold = bucket["Alarms"]["ReplicationLatency"]["High"] or 0 %}
+{%-   set MediumThreshold = bucket["Alarms"]["ReplicationLatency"]["Medium"] or 0 %}
+{%-   set LowThreshold = bucket["Alarms"]["ReplicationLatency"]["Low"] or 0 %}
+{%- endif %}
+{%- endif %}
+
+  r{{format_name(bucket.name)}}HighReplicationLatency:
+    Type: AWS::CloudWatch::Alarm
+    Condition: c{{format_name(bucket.name)}}AlarmHigh
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} High: S3 Bucket Replication Latency reached {{HighThreshold}} seconds",
+          "description": "High Alarm when S3 Bucket {{ bucketName }} reaches Replication Latency of {{HighThreshold}} seconds",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "High"
+        }
+      Namespace: "AWS/S3"
+      MetricName: ReplicationLatency
+      Dimensions:
+        - Name: SourceBucket
+          Value: {{ bucketName }}
+        - Name: DestinationBucket
+          Value: {{ destBucketName }}
+        - Name: RuleId
+          Value: {{ ruleId }}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{HighThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_high_alarm_sns_to_dash
+
+  r{{format_name(bucket.name)}}MediumReplicationLatency:
+    Type: AWS::CloudWatch::Alarm
+    Condition: c{{format_name(bucket.name)}}AlarmMedium
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} Medium: S3 Bucket Replication Latency reached {{MediumThreshold}} seconds",
+          "description": "Medium Alarm when S3 Bucket {{ bucketName }} reaches Replication Latency of {{MediumThreshold}} seconds",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "Medium"
+        }
+      Namespace: "AWS/S3"
+      MetricName: ReplicationLatency
+      Dimensions:
+        - Name: SourceBucket
+          Value: {{ bucketName }}
+        - Name: DestinationBucket
+          Value: {{ destBucketName }}
+        - Name: RuleId
+          Value: {{ ruleId }}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{MediumThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_medium_alarm_sns_to_dash
+
+  r{{format_name(bucket.name)}}LowReplicationLatency:
+    Type: AWS::CloudWatch::Alarm
+    Condition: c{{format_name(bucket.name)}}AlarmLow
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} Low: S3 Bucket Replication Latency reached {{LowThreshold}} seconds",
+          "description": "Low Alarm when S3 Bucket {{ bucketName }} reaches Replication Latency of {{LowThreshold}} seconds",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "Low"
+        }
+      Namespace: "AWS/S3"
+      MetricName: ReplicationLatency
+      Dimensions:
+        - Name: SourceBucket
+          Value: {{ bucketName }}
+        - Name: DestinationBucket
+          Value: {{ destBucketName }}
+        - Name: RuleId
+          Value: {{ ruleId }}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{LowThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_low_alarm_sns_to_dash
+
+{%- if CrossAccountEnabled == 'true' %}
+
+  r{{format_name(bucket.name)}}CrossAccountHighReplicationLatency:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} High: S3 Bucket Cross Account Replication to account {{ DestinationAccountId }} Latency reached {{HighThreshold}} seconds",
+          "description": "High Alarm when S3 Bucket {{ bucketName }} reaches Replication Latency of {{HighThreshold}} seconds",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "High"
+        }
+      Namespace: "AWS/S3"
+      MetricName: ReplicationLatency
+      Dimensions:
+        - Name: SourceBucket
+          Value: {{ bucketName }}
+        - Name: DestinationBucket
+          Value: {{ CrossAccountBucketName }}
+        - Name: RuleId
+          Value: {{ CrossAccountRuleId }}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{HighThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_high_alarm_sns_to_dash
+
+  r{{format_name(bucket.name)}}CrossAccountMediumReplicationLatency:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} Medium: S3 Bucket Cross Account Replication to account {{ DestinationAccountId }} Latency reached {{MediumThreshold}} seconds",
+          "description": "Medium Alarm when S3 Bucket {{ bucketName }} reaches Replication Latency of {{MediumThreshold}} seconds",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "Medium"
+        }
+      Namespace: "AWS/S3"
+      MetricName: ReplicationLatency
+      Dimensions:
+        - Name: SourceBucket
+          Value: {{ bucketName }}
+        - Name: DestinationBucket
+          Value: {{ CrossAccountBucketName }}
+        - Name: RuleId
+          Value: {{ CrossAccountRuleId }}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{MediumThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_medium_alarm_sns_to_dash
+
+  r{{format_name(bucket.name)}}CrossAccountLowReplicationLatency:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} Low: S3 Bucket Cross Account Replication to account {{ DestinationAccountId }} Latency reached {{LowThreshold}} seconds",
+          "description": "Low Alarm when S3 Bucket {{ bucketName }} reaches Replication Latency of {{LowThreshold}} seconds",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "Low"
+        }
+      Namespace: "AWS/S3"
+      MetricName: ReplicationLatency
+      Dimensions:
+        - Name: SourceBucket
+          Value: {{ bucketName }}
+        - Name: DestinationBucket
+          Value: {{ CrossAccountBucketName }}
+        - Name: RuleId
+          Value: {{ CrossAccountRuleId }}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{LowThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_low_alarm_sns_to_dash
+{%- endif %}
+{% endfor %}

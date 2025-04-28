@@ -1,0 +1,67 @@
+{%- macro format_name(name) -%}
+  {{ name | replace('-','') | replace('_','') | truncate(92, true, '') }}
+{%- endmacro -%}
+
+{%- macro hyphen_to_underscore(str) -%}
+  {{ str | replace('-','_') | truncate(92, true, '') }}
+{%- endmacro -%}
+
+---
+Description: AGBD analytics Glue Job Template
+
+Parameters:
+
+  pDepartment:
+    Type: String
+    AllowedPattern: "[a-z][a-z0-9-]*"
+    ConstraintDescription: 'Must start with a letter and be all lowercase'
+    Description: 'The department Name for the Account (decp, etc)'
+
+  pNamespace:
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9-]*'
+    ConstraintDescription: 'Must start with a letter and be all lowercase'
+    Description: 'The Namespace or Platform Instance (generally defined as $hangar-$appname)'
+
+  pRegion:
+    Type: String
+    Description: 'The AWS region'
+
+  pEnvName:
+    Type: String
+    Description: 'The environment'
+
+  pIamRole:
+    Type: String
+    Description: Domain Specific Project wide IAM role
+
+  pAppName:
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9-]*'
+    ConstraintDescription: 'Must start with a letter and be all lowercase'
+    Description: 'The appname contained within module namespace (FlightKeys etc.)'
+
+  pDatalakeBucketPrefix:
+    Type: String
+    Description: 'The bucket name format for source s3 buckets created by datalake team'
+
+  pGlueTempBucketSuffix:
+    Type: String
+    Description: The generic name that is appended to the end of the s3 bucket for temp storage (glue-job-temporary)
+
+  pS3ScriptBucket:
+    Type: String
+    Description: The s3 source bucket
+
+  pGlueScriptKeyPrefix:
+    Type: String
+    Description: The path to source files
+
+  pLakeFormationBucket:
+    Type: String
+    Description: The Lake Formation S3 bucket
+
+Resources:
+
+{% include 'agbd-analytics-etl-glue-job.j2' %}
+{% include 'agbd-analytics-etl-redshift-job.j2' %}

@@ -1,0 +1,9 @@
+modules:
+  400-s3-module:
+    groupId: cloudCatalog
+    name: cloud-common-s3-module
+    version: 4.10.0
+  100-agbd-bofl-etl-module:
+    name: decp-agbd-analytics-etl-module
+    path: local
+    version: local

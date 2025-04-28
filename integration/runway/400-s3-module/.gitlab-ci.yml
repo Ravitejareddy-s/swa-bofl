@@ -1,0 +1,17 @@
+variables:
+  NODE_BUILD_DISABLED: 'true'
+  UNIT_TEST_DISABLED: 'true'
+
+include:
+  - project: swa-common/ccp/ccplat-pipeline-fragments
+    ref: 3.83.14
+    file: pipelines/build-module-poetry.gitlab-ci.yml
+
+lint-python:
+  parallel: &python-version-matrix
+    matrix:
+      - PYTHON_VERSION: ['3.9', '3.10', '3.11']
+
+test-python:
+  parallel:
+    <<: *python-version-matrix

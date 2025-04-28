@@ -1,0 +1,69 @@
+# files listed under framework_libs/extra-jars should have null after colon
+framework_libs: &framework_libs
+  src.zip:
+extra-jars:
+  hudi-spark3-bundle-0.13.1.jar:
+
+
+# Env Specific Configs
+datalake_source_database: &source_database datalake_dev1_agbd
+datalake_source_table_name: &source_table_name curatedsecure_bag_on_flight_leg_state_v1_prqt
+datalake_entp_database: &datalake_entp_database datalake_dev1_entp_agbd
+base_s3_path: &base_s3_path s3://datalake-us-east-1-dev1-curated-secure/commodity/entp-agbd/agbd-analytics
+rejected_bucket: &rejected_bucket idfp-us-east-1-dev1-decp-commodity
+checkpoint_dir: &checkpoint_dir s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/checkpoint
+
+
+
+# Redshift Specific Configs
+redshift_temp_dir: &redshift_temp_dir s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/rs-load-temp-dir
+redshift_secret: &redshift_secret dev1-dwcp-redshift-dwcp_cmdty_load-etl
+redshift_iam_role: &redshift_iam_role arn:aws:iam::437298529078:role/idfp-dev1-dwcp-redshift-etl-role
+redshift_checkpoint_dir: &redshift_checkpoint_dir s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/data/rs-load-checkpoint/
+redshift_database: &redshift_database swadb
+redshift_stg_schema: &redshift_stg_schema cdw_st
+redshift_target_schema: &redshift_target_schema cdw_db
+redshift_region: &redshift_region us-east-1
+
+vEtlJobs:
+  jobs:
+    - name: agbd-bofl-evnt-analytics-hudi-load
+      ScriptLocation: agbd-bofl-evnt-analytics-hudi-load
+      WorkerType: G.2X
+      glueArguments:
+        source_database: *source_database
+        source_table_name: *source_table_name
+        base_s3_path: *base_s3_path
+        target_db: *datalake_entp_database
+        target_table_name: agbd_bofl_evnt
+        job-bookmark-option: job-bookmark-enable
+        bookmark: agbd-bofl-evnt-hudi-load/
+        push_down_begin: 2025-04-01
+        push_down_end: 2025-04-20
+      pyFiles:
+        <<: *framework_libs
+
+    
+
+  RedshiftJobs:
+    - name: agbd-bofl-evnt-analytics-rs-load
+      ScriptLocation: agbd-bofl-evnt-analytics-rs-load
+      glueArguments:
+        hudi_s3_path: *base_s3_path
+        hudi_database: *datalake_entp_database
+        hudi_table_name: agbd_bofl_evnt
+        rs_tmp_s3_path: *redshift_temp_dir
+        rs_iam_role: *redshift_iam_role
+        rs_secret_name: *redshift_secret
+        rs_region: *redshift_region
+        rs_database: *redshift_database
+        rs_stg_tbl: cdw_st.agbd_bofl_evnt
+        rs_target_tbl: cdw_db.agbd_bofl_evnt
+        hudi_begin_instanttime: None
+        checkpoint_dir: *checkpoint_dir
+        additional-python-modules: redshift_connector
+      pyFiles:
+        <<: *framework_libs
+
+    
+

@@ -1,0 +1,53 @@
+deployments:
+  - account_alias:
+    account_id:
+    assume_role:
+      arn:
+      duration: 3600
+      post_deploy_env_revert: false
+      session_name: runway
+    env_vars: {}
+    environments: {}
+    module_options: {}
+    modules:
+      - class_path:
+        env_vars: {}
+        environments: {}
+        name: 400-s3-module
+        options: {}
+        parallel: []
+        parameters: {}
+        path:
+          location: ./
+          options: {}
+          source: local
+          uri: /work/integration/runway/400-s3-module
+        tags:
+          - 00-main
+        type: cloudformation
+      - class_path:
+        env_vars: {}
+        environments: {}
+        name: 100-agbd-bofl-etl-module
+        options: {}
+        parallel: []
+        parameters: {}
+        path:
+          location: ./
+          options: {}
+          source: local
+          uri: /work/integration/runway/100-agbd-bofl-etl-module
+        tags:
+          - 00-main
+        type: cloudformation
+    name: 00-main
+    parallel_regions: []
+    parameters: {}
+    regions:
+      - us-east-1
+future: {}
+ignore_git_branch: true
+runway_version: '>=3.4.0'
+variables:
+  file_path:
+  sys_path: .

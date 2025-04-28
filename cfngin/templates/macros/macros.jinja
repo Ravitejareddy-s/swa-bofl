@@ -1,0 +1,6 @@
+{%- macro format_name(name) -%}
+{{ name | replace('-','') | replace('.','') | replace('_','') | truncate(92, true, '') | capitalize }}
+{%- endmacro -%}
+{%- macro format_bool(bool) -%}
+{{ bool | string | lower }}
+{%- endmacro -%}

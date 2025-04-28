@@ -1,0 +1,75 @@
+{%- macro format_name(name) -%}
+  {{ name | replace('-','') | replace('_','') | truncate(92, true, '') }}
+{%- endmacro -%}
+
+{%- macro hyphen_to_underscore(str) -%}
+  {{ str | replace('-','_') | truncate(92, true, '') }}
+{%- endmacro -%}
+
+{% for job in variables.vModuleConfig['vEtlJobs']['RedshiftJobs'] %}
+  #-------------------------------------------------------------------------------
+  # Redshift load - Glue ETL job for {{job.name}}
+  #
+  # Glue spark job with script in S3
+  #-------------------------------------------------------------------------------
+  rGlueJob{{format_name(job.name)}}:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Join ['-', [!Ref pDepartment, !Ref pNamespace, {{job.name}}]]
+      Role: !Ref pIamRole
+      Description: 'Glue ETL job'
+      GlueVersion: '4.0'
+      NumberOfWorkers: 5
+      WorkerType: G.2X
+      ExecutionProperty:
+        MaxConcurrentRuns: 50
+      Timeout: 60
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation:  !Sub "s3://${pS3ScriptBucket}/${pGlueScriptKeyPrefix}/src/{{job.ScriptLocation}}.py"
+      DefaultArguments:
+        "--TempDir":  !Sub "s3://${pLakeFormationBucket}/temp/{{job.name}}"
+
+{% if job['pyFiles'] is defined %}
+{% set s3_list = [] %}
+{% for value in job['pyFiles'].keys() %}
+    {{- s3_list.append("s3://${pS3ScriptBucket}/${pGlueScriptKeyPrefix}/src/"+value)|default("", True) -}}
+{% endfor %}
+        "--extra-py-files": !Sub "{{ s3_list|join(',') }}"
+{% endif %}
+{% if job['extra-jars'] is defined %}
+{% set s3_list = [] %}
+{% for value in job['extra-jars'].keys() %}
+    {{- s3_list.append("s3://${pS3ScriptBucket}/${pGlueScriptKeyPrefix}/src/jars/"+value)|default("", True) -}}
+{% endfor %}
+        "--extra-jars": !Sub "{{ s3_list|join(',') }}"
+{% endif %}
+{% if job['otherLibFiles'] is defined %}
+{% set s3_list = [] %}
+{% for value in job['otherLibFiles'].keys() %}
+    {{- s3_list.append("s3://${pS3ScriptBucket}/${pGlueScriptKeyPrefix}/src/"+value)|default("", True) -}}
+{% endfor %}
+        "--extra-files": !Sub "{{ s3_list|join(',') }}"
+{% endif %}
+        "--enable-continuous-cloudwatch-log": true
+        "--conf": "spark.serializer=org.apache.spark.serializer.KryoSerializer --conf spark.sql.hive.convertMetastoreParquet=false"
+        "--datalake-formats": "hudi"
+        "--enable-auto-scaling": true
+        "--enable-glue-datacatalog": true
+        "--tempdir": !Sub "s3://${pLakeFormationBucket}/temp/{{job.name}}"
+        "--base_s3_path": !Sub "s3://${pLakeFormationBucket}"
+{% for key, val in job['glueArguments'].items()  %}
+{% if key == 'hudi_table' %}
+        "--hudi_table": !Sub "s3://${pLakeFormationBucket}/{{val}}"
+{% else %}
+        "--{{key}}": {{val}}
+{%- endif -%}
+{% endfor %}
+
+      Connections:
+        Connections:
+          - 'DecpRSNetworkingConfig-1a'
+          - 'DecpRSNetworkingConfig-1b'
+          - 'DecpRSNetworkingConfig-1c'
+{% endfor %}

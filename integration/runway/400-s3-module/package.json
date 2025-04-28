@@ -1,0 +1,13 @@
+{
+  "devDependencies": {
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/gitlab": "^12.1.1",
+    "@swa-ccp/cspell-dict": "^1.4.2",
+    "cspell": "^8.4.1",
+    "pyright": "^1.1.351",
+    "semantic-release": "^22.0.12"
+  },
+  "name": "cloud-common-s3-module",
+  "version": "4.10.0"
+}

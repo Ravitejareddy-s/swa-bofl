@@ -1,0 +1,167 @@
+{%- macro format_name(name) -%}
+{{ name | replace('-','') | truncate(92, "true", '') }}
+{%- endmacro -%}
+
+# The variables used in this template are named with the following convention
+#   Variables that start with a c are conditions
+#   Variables that start with a r are resources
+#   Variables that start with a p are parameters
+#   Variables that start with a o are outputs
+
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Creates and Configures Delete Request Alarms for the S3 Module'
+
+{% set dept = variables.pDepartment -%}
+{%- set reg = variables.pRegion -%}
+{%- set ns = variables.pNamespace -%}
+{%- set bucketNamePrefix = [dept, reg, ns]|join("-") %}
+{%- set svc_console_grp = variables.pServiceConsoleGroup -%}
+
+Conditions:
+{%- for bucket in variables.vBucketList['vBucketList'] %}
+{%- set AlarmsHigh = "false" %}
+{%- set AlarmsMedium = "false" %}
+{%- set AlarmsLow = "false" %}
+{%- set MetricsEnabled = "false" %}
+{%- if bucket["Alarms"] is defined %}
+{%- if bucket["Alarms"]["DeleteRequests"] is defined %}
+{%- if bucket["Alarms"]["DeleteRequests"]["High"] is defined %}
+{%-   set AlarmsHigh = "true" %}
+{%- endif %}
+{%- if bucket["Alarms"]["DeleteRequests"]["Medium"] is defined %}
+{%-   set AlarmsMedium = "true" %}
+{%- endif %}
+{%- if bucket["Alarms"]["DeleteRequests"]["Low"] is defined %}
+{%-   set AlarmsLow = "true" %}
+{%- endif %}
+{%- endif %}
+{%- endif %}
+{%- if bucket.enableRequestMetrics %}
+{%-   set MetricsEnabled = "true" %}
+{%- endif %}
+
+  c{{format_name(bucket.name)}}AlarmHighConfigured: !Equals [ "true", {{ AlarmsHigh }} ]
+  c{{format_name(bucket.name)}}AlarmMediumConfigured: !Equals [ "true", {{ AlarmsMedium }} ]
+  c{{format_name(bucket.name)}}AlarmLowConfigured: !Equals [ "true", {{ AlarmsLow }} ]
+  c{{format_name(bucket.name)}}MetricsEnabled: !Equals [ "true", {{ MetricsEnabled }} ]
+  c{{format_name(bucket.name)}}AlarmHigh: !And
+    - !Condition c{{format_name(bucket.name)}}AlarmHighConfigured
+    - !Condition c{{format_name(bucket.name)}}MetricsEnabled
+  c{{format_name(bucket.name)}}AlarmMedium: !And
+    - !Condition c{{format_name(bucket.name)}}AlarmMediumConfigured
+    - !Condition c{{format_name(bucket.name)}}MetricsEnabled
+  c{{format_name(bucket.name)}}AlarmLow: !And
+    - !Condition c{{format_name(bucket.name)}}AlarmLowConfigured
+    - !Condition c{{format_name(bucket.name)}}MetricsEnabled
+
+{%- endfor %}
+
+
+Resources:
+{%- for bucket in variables.vBucketList['vBucketList'] %}
+{%- set bucketName = [bucketNamePrefix, bucket.name]|join("-") %}
+{%- set EvaluationPeriods = 1 %}
+{%- set HighThreshold = 0 %}
+{%- set MediumThreshold = 0 %}
+{%- set LowThreshold = 0 %}
+{%- set assignment_grp = svc_console_grp -%}
+{%- set application = svc_console_grp -%}
+{%- if bucket["Alarms"] is defined %}
+{%- if bucket["Alarms"]["AssignmentGroup"] is defined  -%}
+{%- set assignment_grp = bucket["Alarms"]["AssignmentGroup"] -%}
+{%- set application = bucket["Alarms"]["AssignmentGroup"] -%}
+{%- endif -%}
+{%- if bucket["Alarms"]["Application"] is defined  -%}
+{%- set application = bucket["Alarms"]["Application"] -%}
+{%- endif -%}
+{%- if bucket["Alarms"]["DeleteRequests"] is defined  %}
+{%-   set EvaluationPeriods = bucket["Alarms"]["DeleteRequests"]["EvaluationPeriods"] or 1 %}
+{%-   set HighThreshold = bucket["Alarms"]["DeleteRequests"]["High"] or 0 %}
+{%-   set MediumThreshold = bucket["Alarms"]["DeleteRequests"]["Medium"] or 0 %}
+{%-   set LowThreshold = bucket["Alarms"]["DeleteRequests"]["Low"] or 0 %}
+{%- endif %}
+{%- endif %}
+
+  r{{format_name(bucket.name)}}HighDeleteRequests:
+    Type: AWS::CloudWatch::Alarm
+    Condition: c{{format_name(bucket.name)}}AlarmHigh
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} High: S3 Bucket reached {{HighThreshold}} delete requests",
+          "description": "High Alarm when S3 Bucket {{ bucketName }} reaches {{HighThreshold}} delete requests",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "High"
+        }
+      Namespace: "AWS/S3"
+      MetricName: DeleteRequests
+      Dimensions:
+        - Name: BucketName
+          Value: {{ bucketName }}
+        - Name: FilterId
+          Value: EntireBucket
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{HighThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_high_alarm_sns_to_dash
+
+  r{{format_name(bucket.name)}}MediumDeleteRequests:
+    Type: AWS::CloudWatch::Alarm
+    Condition: c{{format_name(bucket.name)}}AlarmMedium
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} Medium: S3 Bucket reached {{MediumThreshold}} delete requests",
+          "description": "Medium Alarm when S3 Bucket {{ bucketName }} reaches {{MediumThreshold}} delete requests",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "Medium"
+        }
+      Namespace: "AWS/S3"
+      MetricName: DeleteRequests
+      Dimensions:
+        - Name: BucketName
+          Value: {{ bucketName }}
+        - Name: FilterId
+          Value: EntireBucket
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{MediumThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_medium_alarm_sns_to_dash
+
+  r{{format_name(bucket.name)}}LowDeleteRequests:
+    Type: AWS::CloudWatch::Alarm
+    Condition: c{{format_name(bucket.name)}}AlarmLow
+    Properties:
+      AlarmDescription: |
+        {
+          "title": "OPS {{application}} Low: S3 Bucket reached {{LowThreshold}} delete requests",
+          "description": "Low Alarm when S3 Bucket {{ bucketName }} reaches {{LowThreshold}} delete requests",
+          "application": "{{application}}",
+          "assignment_group": "{{assignment_grp}}",
+          "severity": "Low"
+        }
+      Namespace: "AWS/S3"
+      MetricName: DeleteRequests
+      Dimensions:
+        - Name: BucketName
+          Value: {{ bucketName }}
+        - Name: FilterId
+          Value: EntireBucket
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: {{EvaluationPeriods}}
+      Threshold: {{LowThreshold}}
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:cw_low_alarm_sns_to_dash
+
+{% endfor %}

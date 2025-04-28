@@ -1,0 +1,2 @@
+ccplatcfnginlibs~=5.7
+decputilities~=1.7.2

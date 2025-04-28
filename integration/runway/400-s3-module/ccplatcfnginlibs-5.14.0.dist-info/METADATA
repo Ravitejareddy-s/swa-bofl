@@ -1,0 +1,282 @@
+Metadata-Version: 2.1
+Name: ccplatcfnginlibs
+Version: 5.14.0
+Summary: CCPLAT Python CFNgin Libraries
+Home-page: https://gitlab-tools.swacorp.com/swa-common/ccp/python-libraries/ccplatcfnginlibs
+Author: Enterprise Cloud
+Author-email: EC-CloudCommonPod-DG@wnco.com
+Maintainer: Enterprise Cloud
+Maintainer-email: EC-CloudCommonPod-DG@wnco.com
+Requires-Python: >=3.9,<4.0
+Classifier: Intended Audience :: Developers
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Utilities
+Requires-Dist: deprecated (>=1.2.13,<2.0.0)
+Requires-Dist: jsonpath-ng (>=1.5.3,<2.0.0)
+Requires-Dist: kubernetes (>=23.6.0,<24.0.0)
+Requires-Dist: swa-runway (>=3.4.0,<5.0.0)
+Project-URL: Repository, https://gitlab-tools.swacorp.com/swa-common/ccp/python-libraries/ccplatcfnginlibs
+Description-Content-Type: text/markdown
+
+# ccplatcfnginlibs
+
+**Table Of Contents** <!-- markdownlint-disable-line MD036 -->
+
+<!-- mdformat-toc start --slug=gitlab --no-anchors --maxlevel=6 --minlevel=2 -->
+
+- [Installation](#installation)
+  - [pip](#pip)
+  - [poetry](#poetry)
+- [Hooks](#hooks)
+- [Lookups](#lookups)
+  - [Replacing `available_subnets`](#replacing-available_subnets)
+- [Developers Guide](#developers-guide)
+  - [Local Development Environment](#local-development-environment)
+    - [Prerequisites](#prerequisites)
+    - [Setup](#setup)
+  - [Interacting With The Project](#interacting-with-the-project)
+
+<!-- mdformat-toc end -->
+
+## Installation
+
+### pip
+
+```console
+$ pip install "ccplatcfnginlibs==<version>" \
+  --index https://nexus-tools.swacorp.com/repository/all-pypi/simple \
+  --trusted-host nexus-tools.swacorp.com
+...
+```
+
+### poetry
+
+```console
+$ poetry add ccplatcfnginlibs --source swa
+```
+
+> **NOTE:** Requires the following addition to `pyproject.toml` to define the source:
+>
+> ```toml
+> [[tool.poetry.source]]
+> name = "swa"
+> priority = "supplemental"
+> url = "https://nexus-tools.swacorp.com/repository/all-pypi/simple"
+> ```
+
+## Hooks
+
+- [ccplatcfnginlibs.hooks.CcplatCommonHooks](./ccplatcfnginlibs/hooks/_ccplat_common_hooks.py)
+- [ccplatcfnginlibs.hooks.configure_cross_region_replication](./ccplatcfnginlibs/hooks/_configure_cross_region_replication.py)
+- [ccplatcfnginlibs.hooks.configure_stack_name](./ccplatcfnginlibs/hooks/_configure_stack_name.py) _(deprecated)_
+- [ccplatcfnginlibs.hooks.create_custom_parameters](./ccplatcfnginlibs/hooks/_create_custom_parameters.py)
+- [ccplatcfnginlibs.hooks.create_module_ssm_parameters](./ccplatcfnginlibs/hooks/_create_module_ssm_parameters.py) _(deprecated)_
+- [ccplatcfnginlibs.hooks.delete_custom_parameters](./ccplatcfnginlibs/hooks/_delete_custom_parameters.py)
+- [ccplatcfnginlibs.hooks.delete_module_ssm_parameters](./ccplatcfnginlibs/hooks/_delete_module_ssm_parameters.py) _(deprecated)_
+- [ccplatcfnginlibs.hooks.deploy_lz_artifacts](./ccplatcfnginlibs/hooks/_deploy_lz_artifacts.py)
+- [ccplatcfnginlibs.hooks.empty_buckets](./ccplatcfnginlibs/hooks/_empty_buckets.py)
+- [ccplatcfnginlibs.hooks.ensure_apigateway_service_role](./ccplatcfnginlibs/hooks/_ensure_apigateway_service_role.py)
+- [ccplatcfnginlibs.hooks.ensure_autoscaling_service_role](./ccplatcfnginlibs/hooks/_ensure_autoscaling_service_role.py)
+- [ccplatcfnginlibs.hooks.validate_config](./ccplatcfnginlibs/hooks/_validate_config.py)
+- [ccplatcfnginlibs.hooks.validate_subnets](./ccplatcfnginlibs/hooks/_validate_subnets.py)
+- [ccplatcfnginlibs.hooks.validate_subnets_yaml](./ccplatcfnginlibs/hooks/_validate_subnets_yaml.py)
+- [ccplatcfnginlibs.hooks.validate_vpc_version](./ccplatcfnginlibs/hooks/_validate_vpc_version.py)
+
+## Lookups
+
+- [available_subnets](./ccplatcfnginlibs/lookups/_available_subnets.py) _(deprecated)_
+- [configs](./ccplatcfnginlibs/lookups/_configs.py)
+- [cx_param_ref](./ccplatcfnginlibs/lookups/_cx_param_ref.py) _(deprecated)_
+- [hz_exists](./ccplatcfnginlibs/lookups/_hz_exists.py)
+- [hz_id](./ccplatcfnginlibs/lookups/_hz_id.py)
+- [hz_name](./ccplatcfnginlibs/lookups/_hz_name.py)
+- [hz_region](./ccplatcfnginlibs/lookups/_hz_region.py)
+- [log_retention](./ccplatcfnginlibs/lookups/_log_retention.py)
+- [s3_prefix_list_id](./ccplatcfnginlibs/lookups/_s3_prefix_list_id.py)
+- [stack_outputs](./ccplatcfnginlibs/lookups/_stack_outputs.py) _(deprecated)_
+- [subnet_cidrs](./ccplatcfnginlibs/lookups/_subnet_cidrs.py)
+
+### Replacing `available_subnets`
+
+Replacing usages of the [available_subnets](./ccplatcfnginlibs/lookups/_available_subnets.py) is simple but requires a slight design change to do so properly.
+Places that use this hook typically use a parameter type of `CommaDelimitedList`.
+These should be replaced with a set of `String` type parameters, one for each Subnet that can be provided.
+This enables the use of an variable number of Subnets when using the `cfn` lookup built into Runway.
+
+**`Example CFNgin Config File`** <!-- markdownlint-disable-line MD036 -->
+
+```yaml
+stacks:
+  - name: my-stack
+    variables:
+      SomeSubnet0: ${cfn external-stack-0.Subnet::default=None}
+      SomeSubnet1: ${cfn external-stack-1.Subnet::default=None}
+      SomeSubnet2: ${cfn external-stack-2.Subnet::default=None}
+      SomeSubnet3: ${cfn external-stack-3.Subnet::default=None}
+    ...
+```
+
+**`Example Blueprint`** <!-- markdownlint-disable-line MD036 -->
+
+```python
+class MyBlueprint(GenericBlueprint[MyBlueprintVariables]):
+    """VPC Blueprint."""
+
+    VARIABLES = {
+        "SomeSubnet0": {"type": CFNString, "default": "undefined"},
+        "SomeSubnet1": {"type": CFNString, "default": "undefined"},
+        "SomeSubnet2": {"type": CFNString, "default": "undefined"},
+        "SomeSubnet3": {"type": CFNString, "default": "undefined"},
+    }
+
+    def create_template(self) -> None:
+        """Create template."""
+        self.add_condition(
+            "some_subnet_0_provided",
+            Not(Equals(self.variables["SomeSubnet0"].ref, "undefined")),
+        )
+        self.add_condition(
+            "some_subnet_1_provided",
+            Not(Equals(self.variables["SomeSubnet1"].ref, "undefined")),
+        )
+        self.add_condition(
+            "some_subnet_2_provided",
+            Not(Equals(self.variables["SomeSubnet2"].ref, "undefined")),
+        )
+        self.add_condition(
+            "some_subnet_3_provided",
+            Not(Equals(self.variables["SomeSubnet3"].ref, "undefined")),
+        )
+        self.add_resource(
+            SomeTroposphereResource(
+                "MyResource",
+                Subnets=[
+                    If(
+                        "some_subnet_0_provided",
+                        self.variables["SomeSubnet0"].ref,
+                        NoValue,
+                    ),
+                    If(
+                        "some_subnet_1_provided",
+                        self.variables["SomeSubnet1"].ref,
+                        NoValue,
+                    ),
+                    If(
+                        "some_subnet_2_provided",
+                        self.variables["SomeSubnet2"].ref,
+                        NoValue,
+                    ),
+                    If(
+                        "some_subnet_3_provided",
+                        self.variables["SomeSubnet3"].ref,
+                        NoValue,
+                    ),
+                ],
+            )
+        )
+```
+
+**`Example CloudFormationTemplate`** <!-- markdownlint-disable-line MD036 -->
+
+```yaml
+Parameters:
+  SomeSubnet0:
+    Default: undefined
+    Type: String
+  SomeSubnet1:
+    Default: undefined
+    Type: String
+  SomeSubnet2:
+    Default: undefined
+    Type: String
+  SomeSubnet3:
+    Default: undefined
+    Type: String
+
+Conditions:
+  SomeSubnet0Provided: !Not [ !Equals [ !Ref SomeSubnet0, "undefined" ] ]
+  SomeSubnet1Provided: !Not [ !Equals [ !Ref SomeSubnet1, "undefined" ] ]
+  SomeSubnet2Provided: !Not [ !Equals [ !Ref SomeSubnet2, "undefined" ] ]
+  SomeSubnet3Provided: !Not [ !Equals [ !Ref SomeSubnet3, "undefined" ] ]
+
+Resources:
+  MyResource:
+    Type: AWS::Some::Resource
+    Properties:
+      Subnets:
+        - !If
+            - SomeSubnet0Provided
+            - !Ref SomeSubnet0
+            - !Ref AWS::NoValue
+        - !If
+            - SomeSubnet1Provided
+            - !Ref SomeSubnet1
+            - !Ref AWS::NoValue
+        - !If
+            - SomeSubnet2Provided
+            - !Ref SomeSubnet2
+            - !Ref AWS::NoValue
+        - !If
+            - SomeSubnet3Provided
+            - !Ref SomeSubnet3
+            - !Ref AWS::NoValue
+```
+
+## Developers Guide
+
+### Local Development Environment
+
+#### Prerequisites
+
+Some of the listed prerequisites are _recommended_ but not required.
+
+- [Make] (GNU recommended) for simplified actions
+  - the version included in macOS can be used or use `brew install make` to install GNU Make (be sure to read the post-install caveats)
+  - `sudo apt install make` or `sudo apt install build-essential` or Ubuntu/Debian
+  - `winget install -e --id GnuWin32.Make` on Windows
+- [npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) for type checking & spell check (recommended to use [nvm] to install)
+- [poetry] for Python virtual environments, managing dependencies, and publishing to [Nexus]
+- _(recommended)_ [direnv](https://direnv.net/) for setting environment variables (POSIX only)
+- _(recommended)_ [nvm] to install and manage different versions of node (POSIX only)
+  - see [nvm-windows](https://github.com/coreybutler/nvm-windows) for Windows support
+- _(recommended)_ [pyenv](https://github.com/pyenv/pyenv) to install and manage different versions of Python (POSIX Only)
+  - see [pyenv-win](https://github.com/pyenv-win/pyenv-win) for Windows support
+- _(recommended)_ [Visual Studio Code](https://code.visualstudio.com/) for standardized IDE settings
+
+#### Setup
+
+1. Clone the repo or your fork of this repo.
+1. Change directory into the cloned directory.
+1. Run `make setup`.
+1. Start developing.
+
+By running `make setup`, the following will happen:
+
+1. [poetry] is used to setup a Python virtual environment.
+1. [pre-commit](https://pre-commit.com/) is configured from the virtual environment to run basic checks and formatting when a commit is made.
+   These checks can be run manually using `make run-pre-commit`.
+1. node dependencies are installed.
+
+### Interacting With The Project
+
+Most interactions with the project are handled via [Make] targets used by running `make <target>`.
+
+The most commonly used targets are:
+
+- **help:** outputs a list of all available targets and their descriptions
+- **lint:** runs all linters
+- **setup:** sets up a local development environment
+- **test:** runs test
+
+[make]: https://www.gnu.org/software/make/
+[nexus]: https://nexus-tools.swacorp.com/
+[nvm]: https://github.com/nvm-sh/nvm
+[poetry]: https://python-poetry.org/
+

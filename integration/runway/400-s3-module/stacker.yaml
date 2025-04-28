@@ -1,0 +1,65 @@
+##  Account REGIONAL values which will change once per account and once per region should be 'hardcoded' here.
+##  Values which need to change from one environment to another, should be abstracted to the appropriate .env file.
+
+namespace: ${namespace}
+cfngin_bucket: ${cfngin_bucket_name}
+sys_path: ./
+
+tags:
+  SWA:BusinessService: ${business_service}
+  SWA:Compliance: ${compliance}
+  SWA:Confidentiality: ${confidentiality}
+  SWA:Environment: ${environment}
+  SWA:Name: ${department}
+  CCPModuleName: ${module_name}
+  CCPModuleVersion: ${module_version}
+  CCPNamespace: ${namespace}
+
+pre_deploy:
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
+
+pre_destroy:
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
+  - path: ccplatcfnginlibs.hooks.empty_buckets
+    args:
+      department: ${department}
+      module_config_path: ${module_config}
+
+stacks:
+  s3-bucket:
+    template_path: cfngin/templates/s3.yml.j2
+    variables: &parameters
+      pDepartment: ${department}
+      pEnvName: ${environment}
+      pNamespace: ${namespace}
+      pRegion: ${region}
+      pServiceConsoleGroup: ${default serviceConsoleGroup::}
+      vBucketList: ${file yaml:file://${module_config}}
+  s3-bucket-4xxerrors-alarms:
+    template_path: cfngin/templates/s3-4xxerrors-alarms.yml.j2
+    variables:
+      <<: *parameters
+  s3-bucket-5xxerrors-alarms:
+    template_path: cfngin/templates/s3-5xxerrors-alarms.yml.j2
+    variables:
+      <<: *parameters
+  s3-bucket-delete-requests-alarms:
+    template_path: cfngin/templates/s3-delete-requests-alarms.yml.j2
+    variables:
+      <<: *parameters
+  s3-bucket-replication-latency-alarms:
+    template_path: cfngin/templates/s3-replication-latency-alarms.yml.j2
+    variables:
+      <<: *parameters
+
+post_deploy:
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
+    args:
+      enable_deprecated: ${default enable_ccplat_deprecated_hooks::${env ENABLE_CCPLAT_DEPRECATED_HOOKS::default=true}}
+  - path: ccplatcfnginlibs.hooks.configure_cross_region_replication
+    args:
+      department: ${department}
+      module_config_path: ${module_config}
+
+post_destroy:
+  - path: ccplatcfnginlibs.hooks.CcplatCommonHooks
