@@ -1,0 +1,1 @@
+partition_column = ["reservation_system", "bofl_key"]

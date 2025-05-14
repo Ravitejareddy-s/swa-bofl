@@ -6,6 +6,7 @@ datalake_source_table_name: curatedsecure_bag_on_flight_leg_state_v1_prqt
 extra-jars:
   hudi-spark3-bundle-0.13.1.jar: null
 framework_libs:
+  schemas/bofl_schema.py: null
   src.zip: null
 redshift_checkpoint_dir: s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/data/rs-load-checkpoint/
 redshift_database: swadb
@@ -35,6 +36,7 @@ vEtlJobs:
       rs_tmp_s3_path: s3://idfp-us-east-1-dev1-decp-commodity/entp-agbd/agbd-analytics/rs-load-temp-dir
     name: agbd-bofl-evnt-analytics-rs-load
     pyFiles:
+      schemas/bofl_schema.py: null
       src.zip: null
   jobs:
   - ScriptLocation: agbd-bofl-evnt-analytics-hudi-load
@@ -51,5 +53,6 @@ vEtlJobs:
       target_table_name: agbd_bofl_evnt
     name: agbd-bofl-evnt-analytics-hudi-load
     pyFiles:
+      schemas/bofl_schema.py: null
       src.zip: null
 

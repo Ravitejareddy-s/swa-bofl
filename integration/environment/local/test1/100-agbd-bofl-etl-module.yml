@@ -1,6 +1,7 @@
 # files listed under framework_libs/extra-jars should have null after colon
 framework_libs: &framework_libs
   src.zip:
+  schemas/bofl_schema.py:
 extra-jars:
   hudi-spark3-bundle-0.13.1.jar:
 
